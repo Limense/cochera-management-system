@@ -2,12 +2,30 @@
 
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
+import { useSessionTimeout } from '@/lib/hooks/useSessionTimeout'
+import { SessionWarning, useSessionWarning } from '@/components/auth/SessionWarning'
 
 interface DashboardLayoutProps {
   children: React.ReactNode
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
+  const sessionWarning = useSessionWarning()
+  
+  // Configurar timeout de sesión con callbacks
+  const sessionTimeout = useSessionTimeout({
+    onWarning: (timeRemaining) => {
+      sessionWarning.showWarning(timeRemaining)
+    },
+    onLogout: (reason) => {
+      console.log(`Session ended: ${reason}`)
+      sessionWarning.hideWarning()
+    },
+    onRefresh: () => {
+      console.log('Session refreshed automatically')
+    }
+  })
+
   return (
     <div className="flex h-screen bg-gray-100">
       {/* Sidebar */}
@@ -24,6 +42,14 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
         </main>
       </div>
+
+      {/* Session Warning Modal */}
+      <SessionWarning
+        isVisible={sessionWarning.isVisible}
+        timeRemaining={sessionWarning.timeRemaining}
+        onExtendSession={sessionWarning.extendSession}
+        onLogout={() => sessionTimeout.performLogout('manual')}
+      />
     </div>
   )
 }

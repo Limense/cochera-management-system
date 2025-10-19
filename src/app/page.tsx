@@ -24,7 +24,9 @@ export default function Home() {
         <h1 className="text-2xl font-bold text-gray-900 mb-4">
           Sistema de Cochera
         </h1>
-        <p className="text-gray-600">Cargando...</p>
+        <p className="text-gray-600">
+          {loading ? 'Cargando...' : 'Redirigiendo...'}
+        </p>
       </div>
     </div>
   )
