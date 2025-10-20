@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase/client'
+import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
+
+// Cliente admin de Supabase para bypasear RLS
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+)
 
 // Schema para filtros de reportes
 const reporteSchema = z.object({
@@ -92,17 +104,17 @@ export async function GET(request: NextRequest) {
 
 // Funciones para generar diferentes tipos de reportes
 async function generarReporteIngresos(params: z.infer<typeof reporteSchema>) {
-  const { data: sesiones, error } = await supabase
+  const { data: sesiones, error } = await supabaseAdmin
     .from('sesiones_parqueo')
     .select(`
       id,
       hora_entrada,
       hora_salida,
-      monto_total,
+      monto_calculado,
       placa,
       espacio_numero,
       is_active,
-      vehiculos!inner(tipo, propietario)
+      tipo_vehiculo
     `)
     .gte('hora_entrada', params.fecha_inicio)
     .lte('hora_entrada', params.fecha_fin + ' 23:59:59')
@@ -130,22 +142,48 @@ async function generarReporteIngresos(params: z.infer<typeof reporteSchema>) {
   const sesionesFiltered = params.incluir_activos ? sesiones : sesiones.filter(s => !s.is_active)
 
   // Calcular totales
-  const total_ingresos = sesionesFiltered.reduce((sum, sesion) => sum + (sesion.monto_total || 0), 0)
+  const total_ingresos = sesionesFiltered.reduce((sum, sesion) => sum + (sesion.monto_calculado || 0), 0)
   const total_sesiones = sesionesFiltered.length
   const promedio_por_sesion = total_sesiones > 0 ? total_ingresos / total_sesiones : 0
 
   // Desglose por tipo de vehículo
   const por_tipo: Record<string, { sesiones: number, ingresos: number }> = {}
   
-  sesiones.forEach(sesion => {
-    const tipo = Array.isArray(sesion.vehiculos) && sesion.vehiculos.length > 0 ? sesion.vehiculos[0].tipo : 'auto'
+  sesionesFiltered.forEach(sesion => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tipo = (sesion as any).tipo_vehiculo || 'auto'
     if (!por_tipo[tipo]) por_tipo[tipo] = { sesiones: 0, ingresos: 0 }
     por_tipo[tipo].sesiones += 1
-    por_tipo[tipo].ingresos += sesion.monto_total || 0
+    por_tipo[tipo].ingresos += sesion.monto_calculado || 0
+  })
+
+  // Agrupar datos por período (día, semana o mes)
+  const dataPorPeriodo: Record<string, { periodo: string, ingresos: number, sesiones: number }> = {}
+  
+  sesionesFiltered.forEach(sesion => {
+    const fecha = new Date(sesion.hora_entrada)
+    let periodo = ''
+    
+    if (params.granularidad === 'dia') {
+      periodo = fecha.toISOString().split('T')[0] // YYYY-MM-DD
+    } else if (params.granularidad === 'semana') {
+      const año = fecha.getFullYear()
+      const semana = Math.ceil((fecha.getDate() + new Date(fecha.getFullYear(), fecha.getMonth(), 1).getDay()) / 7)
+      periodo = `${año}-S${semana.toString().padStart(2, '0')}`
+    } else {
+      periodo = `${fecha.getFullYear()}-${(fecha.getMonth() + 1).toString().padStart(2, '0')}`
+    }
+    
+    if (!dataPorPeriodo[periodo]) {
+      dataPorPeriodo[periodo] = { periodo, ingresos: 0, sesiones: 0 }
+    }
+    
+    dataPorPeriodo[periodo].ingresos += sesion.monto_calculado || 0
+    dataPorPeriodo[periodo].sesiones += 1
   })
 
   return {
-    data: sesionesFiltered,
+    data: Object.values(dataPorPeriodo),
     resumen: {
       total_ingresos,
       total_sesiones,
@@ -158,7 +196,7 @@ async function generarReporteIngresos(params: z.infer<typeof reporteSchema>) {
 }
 
 async function generarReporteOcupacion(params: z.infer<typeof reporteSchema>) {
-  const { data: espacios, error: espaciosError } = await supabase
+  const { data: espacios, error: espaciosError } = await supabaseAdmin
     .from('espacios')
     .select('*')
     .order('numero', { ascending: true })
@@ -167,7 +205,7 @@ async function generarReporteOcupacion(params: z.infer<typeof reporteSchema>) {
     throw new Error(`Error obteniendo espacios: ${espaciosError.message}`)
   }
 
-  const { data: sesiones, error: sesionesError } = await supabase
+  const { data: sesiones, error: sesionesError } = await supabaseAdmin
     .from('sesiones_parqueo')
     .select('*')
     .gte('hora_entrada', params.fecha_inicio)
@@ -213,7 +251,7 @@ async function generarReporteOcupacion(params: z.infer<typeof reporteSchema>) {
       total_sesiones: sesionesEspacio.length,
       tiempo_ocupado_horas: Math.round(tiempoTotalHoras * 100) / 100,
       porcentaje_ocupacion: Math.min(Math.round(porcentajeOcupacion * 100) / 100, 100),
-      ingresos_generados: sesionesEspacio.reduce((sum, s) => sum + (s.monto_total || 0), 0)
+      ingresos_generados: sesionesEspacio.reduce((sum, s) => sum + (s.monto_calculado || 0), 0)
     }
   })
 
@@ -241,22 +279,24 @@ async function generarReporteOcupacion(params: z.infer<typeof reporteSchema>) {
 }
 
 async function generarReporteVehiculos(params: z.infer<typeof reporteSchema>) {
-  const { data: sesiones, error } = await supabase
+  // Primero obtenemos todas las sesiones del período
+  const { data: sesiones, error: sesionesError } = await supabaseAdmin
     .from('sesiones_parqueo')
-    .select(`
-      id,
-      hora_entrada,
-      hora_salida,
-      monto_total,
-      placa,
-      is_active,
-      vehiculos!inner(propietario, tipo, marca, color, is_frequent)
-    `)
+    .select('id, hora_entrada, hora_salida, monto_calculado, placa, is_active, tipo_vehiculo')
     .gte('hora_entrada', params.fecha_inicio)
     .lte('hora_entrada', params.fecha_fin + ' 23:59:59')
 
-  if (error) {
-    throw new Error(`Error obteniendo sesiones: ${error.message}`)
+  if (sesionesError) {
+    throw new Error(`Error obteniendo sesiones: ${sesionesError.message}`)
+  }
+
+  // Luego obtenemos información de vehículos
+  const { data: vehiculos, error: vehiculosError } = await supabaseAdmin
+    .from('vehiculos')
+    .select('placa, propietario, tipo, marca, color, is_frequent')
+
+  if (vehiculosError) {
+    throw new Error(`Error obteniendo vehículos: ${vehiculosError.message}`)
   }
 
   if (!sesiones) {
@@ -272,30 +312,37 @@ async function generarReporteVehiculos(params: z.infer<typeof reporteSchema>) {
     }
   }
 
-  // Agrupar por vehículo
+  // Crear un mapa de vehículos para acceso rápido
   const vehiculosMap = new Map()
+  vehiculos?.forEach(v => {
+    vehiculosMap.set(v.placa, v)
+  })
+
+  // Agrupar sesiones por vehículo
+  const vehiculosStats = new Map()
   
   sesiones.forEach(sesion => {
-    if (!vehiculosMap.has(sesion.placa)) {
-      const vehiculoData = Array.isArray(sesion.vehiculos) && sesion.vehiculos.length > 0 ? sesion.vehiculos[0] : null
-      vehiculosMap.set(sesion.placa, {
+    if (!vehiculosStats.has(sesion.placa)) {
+      const vehiculoData = vehiculosMap.get(sesion.placa)
+      vehiculosStats.set(sesion.placa, {
         placa: sesion.placa,
         propietario: vehiculoData?.propietario || 'N/A',
-        tipo: vehiculoData?.tipo || 'auto',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tipo: vehiculoData?.tipo || (sesion as any).tipo_vehiculo || 'auto',
         marca: vehiculoData?.marca || 'N/A',
         color: vehiculoData?.color || 'N/A',
         is_frequent: vehiculoData?.is_frequent || false,
         sesiones: [],
         total_sesiones: 0,
-        monto_total: 0,
+        monto_calculado: 0,
         tiempo_total_minutos: 0
       })
     }
     
-    const vehiculo = vehiculosMap.get(sesion.placa)
+    const vehiculo = vehiculosStats.get(sesion.placa)
     vehiculo.sesiones.push(sesion)
     vehiculo.total_sesiones += 1
-    vehiculo.monto_total += sesion.monto_total || 0
+    vehiculo.monto_calculado += sesion.monto_calculado || 0
     
     if (sesion.hora_salida) {
       const tiempo = new Date(sesion.hora_salida).getTime() - new Date(sesion.hora_entrada).getTime()
@@ -303,7 +350,7 @@ async function generarReporteVehiculos(params: z.infer<typeof reporteSchema>) {
     }
   })
 
-  const estadisticasVehiculos = Array.from(vehiculosMap.values())
+  const estadisticasVehiculos = Array.from(vehiculosStats.values())
   
   // Ordenar por total de sesiones descendente
   estadisticasVehiculos.sort((a, b) => b.total_sesiones - a.total_sesiones)
@@ -326,7 +373,7 @@ async function generarReporteEspacios(params: z.infer<typeof reporteSchema>) {
 }
 
 async function generarReporteTiempos(params: z.infer<typeof reporteSchema>) {
-  const { data: sesiones, error } = await supabase
+  const { data: sesiones, error } = await supabaseAdmin
     .from('sesiones_parqueo')
     .select(`
       id,
@@ -335,7 +382,7 @@ async function generarReporteTiempos(params: z.infer<typeof reporteSchema>) {
       placa,
       espacio_numero,
       is_active,
-      vehiculos!inner(tipo)
+      tipo_vehiculo
     `)
     .gte('hora_entrada', params.fecha_inicio)
     .lte('hora_entrada', params.fecha_fin + ' 23:59:59')
@@ -408,22 +455,36 @@ async function generarReporteTiempos(params: z.infer<typeof reporteSchema>) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function generarReporteFrecuentes(params: z.infer<typeof reporteSchema>) {
-  const { data: vehiculosFrecuentes, error } = await supabase
+  const { data: vehiculosFrecuentes, error } = await supabaseAdmin
     .from('vehiculos')
-    .select(`
-      *,
-      sesiones_parqueo!inner(id, hora_entrada, hora_salida, monto_total)
-    `)
+    .select('*')
     .eq('is_frequent', true)
 
   if (error) {
     throw new Error(`Error obteniendo vehículos frecuentes: ${error.message}`)
   }
 
+  // Obtener sesiones de cada vehículo frecuente
+  const vehiculosConSesiones = await Promise.all(
+    (vehiculosFrecuentes || []).map(async (vehiculo) => {
+      const { data: sesiones } = await supabaseAdmin
+        .from('sesiones_parqueo')
+        .select('id, hora_entrada, hora_salida, monto_calculado')
+        .eq('placa', vehiculo.placa)
+        .order('hora_entrada', { ascending: false })
+        .limit(10)
+
+      return {
+        ...vehiculo,
+        sesiones: sesiones || []
+      }
+    })
+  )
+
   return {
-    data: vehiculosFrecuentes || [],
+    data: vehiculosConSesiones,
     resumen: {
-      total_frecuentes: vehiculosFrecuentes?.length || 0
+      total_frecuentes: vehiculosConSesiones.length
     },
     tipo: 'frecuentes'
   }

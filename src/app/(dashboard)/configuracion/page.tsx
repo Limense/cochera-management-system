@@ -94,13 +94,12 @@ export default function ConfiguracionPage() {
   const { data: usuarios = [], isLoading: loadingUsers } = useQuery({
     queryKey: ['usuarios'],
     queryFn: async (): Promise<Profile[]> => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      return data || []
+      const response = await fetch('/api/usuarios')
+      if (!response.ok) {
+        throw new Error('Error obteniendo usuarios')
+      }
+      const data = await response.json()
+      return data.usuarios || []
     }
   })
 
@@ -146,40 +145,37 @@ export default function ConfiguracionPage() {
     mutationFn: async (data: UsuarioFormData): Promise<void> => {
       if (editingUser) {
         // Actualizar usuario existente
-        const { error } = await supabase
-          .from('profiles')
-          .update({
+        const response = await fetch('/api/usuarios', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editingUser.id,
             full_name: data.full_name,
-            role: data.role,
-            updated_at: new Date().toISOString()
+            role: data.role
           })
-          .eq('id', editingUser.id)
-
-        if (error) throw error
-      } else {
-        // Crear nuevo usuario
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: data.email,
-          password: data.password!,
-          options: {
-            data: { full_name: data.full_name }
-          }
         })
 
-        if (authError) throw authError
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.message || 'Error actualizando usuario')
+        }
+      } else {
+        // Crear nuevo usuario
+        const response = await fetch('/api/usuarios', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: data.email,
+            password: data.password!,
+            full_name: data.full_name,
+            role: data.role,
+            created_by: profile?.id
+          })
+        })
 
-        if (authData.user) {
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .insert({
-              id: authData.user.id,
-              full_name: data.full_name,
-              email: data.email,
-              role: data.role,
-              created_by: profile?.id
-            })
-
-          if (profileError) throw profileError
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.message || 'Error creando usuario')
         }
       }
     },
@@ -202,15 +198,19 @@ export default function ConfiguracionPage() {
   // Mutation para cambiar estado de usuario
   const toggleUserMutation = useMutation({
     mutationFn: async ({ userId, isActive }: { userId: string, isActive: boolean }): Promise<void> => {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ 
-          is_active: isActive,
-          updated_at: new Date().toISOString()
+      const response = await fetch('/api/usuarios', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: userId,
+          is_active: isActive
         })
-        .eq('id', userId)
+      })
 
-      if (error) throw error
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.message || 'Error actualizando usuario')
+      }
     },
     onSuccess: (_, variables) => {
       toast.success(`Usuario ${variables.isActive ? 'activado' : 'desactivado'} exitosamente`)

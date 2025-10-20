@@ -163,38 +163,26 @@ export function useControlCaja() {
         throw new Error('Ya tienes un turno abierto. Cierra el turno actual primero.')
       }
 
-      const fechaHoy = new Date().toISOString().split('T')[0]
-      
-      const { data: nuevoCaja, error } = await supabase
-        .from('control_caja')
-        .insert({
+      // Usar la API en lugar de Supabase directamente
+      const response = await fetch('/api/control-caja', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
           empleado_id: user.id,
-          fecha: fechaHoy,
           dinero_inicial: data.dinero_inicial,
-          observaciones: data.observaciones,
-          estado_turno: 'abierto'
+          observaciones: data.observaciones
         })
-        .select(`
-          *,
-          profiles:empleado_id (
-            full_name,
-            email
-          )
-        `)
-        .single()
-
-      if (error) throw error
-
-      // Log de auditoría
-      await logAuditAction('caja_abierta', {
-        amount: data.dinero_inicial,
-        details: { 
-          fecha: fechaHoy,
-          observaciones: data.observaciones 
-        }
       })
 
-      return nuevoCaja
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Error al abrir caja')
+      }
+
+      const result = await response.json()
+      return result.turno
     },
     onSuccess: (data) => {
       // Invalidar queries relacionadas
@@ -219,38 +207,26 @@ export function useControlCaja() {
         throw new Error('No hay turno abierto para cerrar')
       }
 
-      const { data: cajaActualizada, error } = await supabase
-        .from('control_caja')
-        .update({
+      // Usar la API en lugar de Supabase directamente
+      const response = await fetch('/api/control-caja', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          turno_id: turnoActual.id,
           dinero_final: data.dinero_final,
-          observaciones: data.observaciones,
-          estado_turno: 'cerrado',
-          hora_cierre: new Date().toISOString()
-        })
-        .eq('id', turnoActual.id)
-        .select(`
-          *,
-          profiles:empleado_id (
-            full_name,
-            email
-          )
-        `)
-        .single()
-
-      if (error) throw error
-
-      // Log de auditoría
-      await logAuditAction('caja_cerrada', {
-        amount: data.dinero_final,
-        details: {
-          dinero_inicial: turnoActual.dinero_inicial,
-          dinero_esperado: cajaActualizada.dinero_esperado,
-          diferencia: cajaActualizada.diferencia,
           observaciones: data.observaciones
-        }
+        })
       })
 
-      return cajaActualizada
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Error al cerrar caja')
+      }
+
+      const result = await response.json()
+      return result.turno
     },
     onSuccess: (data) => {
       // Invalidar queries relacionadas
@@ -272,27 +248,6 @@ export function useControlCaja() {
       })
     }
   })
-
-  // Función auxiliar para logging de auditoría
-  const logAuditAction = async (
-    accionTipo: string,
-    detalles: { amount?: number; details?: Record<string, unknown> }
-  ) => {
-    try {
-      await supabase.from('auditoria_logs').insert({
-        usuario_id: user?.id,
-        accion_tipo: accionTipo,
-        tabla_afectada: 'control_caja',
-        registro_id: turnoActual?.id || null,
-        monto: detalles.amount || null,
-        detalles: detalles.details || {},
-        timestamp: new Date().toISOString()
-      })
-    } catch (error) {
-      console.warn('Error al registrar auditoría:', error)
-      // No lanzar error para no interrumpir el flujo principal
-    }
-  }
 
   // Estados calculados
   const hayTurnoAbierto = !!turnoActual

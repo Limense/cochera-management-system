@@ -8,37 +8,22 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Area,
-  AreaChart
-} from 'recharts'
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 import { 
   Download, 
   Calendar, 
   TrendingUp, 
   DollarSign, 
-  Clock, 
   Car,
   FileText,
   Filter,
   RefreshCw
 } from 'lucide-react'
+import { Area, AreaChart, XAxis, YAxis, CartesianGrid, Pie, PieChart } from 'recharts'
+import * as RechartsPrimitive from 'recharts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ReporteData = any
-
-const COLORES_GRAFICOS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D']
 
 const ReportesAvanzados = () => {
   const [reporteActual, setReporteActual] = useState<ReporteData | null>(null)
@@ -61,14 +46,15 @@ const ReportesAvanzados = () => {
       
       const response = await fetch(`/api/reportes?${params}`)
       if (!response.ok) {
-        throw new Error('Error generando reporte')
+        const errorData = await response.json()
+        throw new Error(errorData.message || errorData.error || 'Error generando reporte')
       }
       
       const data = await response.json()
       setReporteActual(data)
     } catch (error) {
-      console.error('Error:', error)
-      alert('Error generando reporte')
+      console.error('Error completo:', error)
+      alert(`Error generando reporte: ${error instanceof Error ? error.message : 'Error desconocido'}`)
     } finally {
       setLoading(false)
     }
@@ -115,11 +101,62 @@ const ReportesAvanzados = () => {
     }
   }
 
+  // Paleta de colores moderna y accesible
+  const chartColors = [
+    'hsl(var(--chart-1))',
+    'hsl(var(--chart-2))',
+    'hsl(var(--chart-3))',
+    'hsl(var(--chart-4))',
+    'hsl(var(--chart-5))',
+    '#36b37e', // verde
+    '#ffab00', // amarillo
+    '#ff5630', // rojo
+    '#6554c0', // violeta
+    '#00b8d9', // cyan
+  ];
+
   const renderGraficoIngresos = () => {
-    if (!reporteActual?.data || !reporteActual?.resumen) return null
+    if (!reporteActual?.data || !reporteActual?.resumen) return null;
+
+    // Datos para gráfico de barras: ingresos por periodo
+    type DataBar = { periodo: string; ingresos: number; sesiones: number };
+    type DataLine = { periodo: string; activas: number; completadas: number };
+    type DataBarTipo = { tipo: string; ingresos: number; color: string };
+
+    interface RawData {
+      periodo: string;
+      ingresos: number;
+      sesiones: number;
+      sesiones_activas?: number;
+      sesiones_completadas?: number;
+    }
+    const dataBar: DataBar[] = (reporteActual.data as RawData[]).map((d) => ({
+      periodo: d.periodo,
+      ingresos: d.ingresos,
+      sesiones: d.sesiones,
+    }));
+
+    // Datos para gráfico de líneas: sesiones activas vs completadas
+    const dataLine: DataLine[] = (reporteActual.data as RawData[]).map((d) => ({
+      periodo: d.periodo,
+      activas: d.sesiones_activas ?? 0,
+      completadas: d.sesiones_completadas ?? d.sesiones ?? 0,
+    }));
+
+    // Datos para gráfico de barras: ingresos por tipo de vehículo
+    type TipoVehiculoResumen = { ingresos: number };
+    const tiposVehiculo: [string, TipoVehiculoResumen][] = reporteActual.resumen.por_tipo_vehiculo
+      ? Object.entries(reporteActual.resumen.por_tipo_vehiculo as Record<string, TipoVehiculoResumen>)
+      : [];
+    const dataBarTipo: DataBarTipo[] = tiposVehiculo.map(([tipo, datos], idx) => ({
+      tipo: tipo.charAt(0).toUpperCase() + tipo.slice(1),
+      ingresos: datos.ingresos,
+      color: chartColors[idx % chartColors.length],
+    }));
 
     return (
       <div className="space-y-6">
+        {/* Tarjetas resumen */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -133,7 +170,6 @@ const ReportesAvanzados = () => {
               </p>
             </CardContent>
           </Card>
-          
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Promedio por Sesión</CardTitle>
@@ -146,7 +182,6 @@ const ReportesAvanzados = () => {
               </p>
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Sesiones Activas</CardTitle>
@@ -161,60 +196,177 @@ const ReportesAvanzados = () => {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Ingresos por Período</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={reporteActual.data}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="periodo" />
-                <YAxis />
-                <Tooltip formatter={(value) => [`$${value}`, 'Ingresos']} />
-                <Area type="monotone" dataKey="ingresos" stroke="#8884d8" fill="#8884d8" fillOpacity={0.6} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        {reporteActual.resumen.por_tipo_vehiculo && (
+        {/* Gráficos en dos columnas para aprovechar el espacio */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Gráfico de área: ingresos por periodo */}
           <Card>
             <CardHeader>
-              <CardTitle>Ingresos por Tipo de Vehículo</CardTitle>
+              <CardTitle>Ingresos por Período</CardTitle>
+              <CardDescription>Evolución temporal de los ingresos</CardDescription>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={Object.entries(reporteActual.resumen.por_tipo_vehiculo).map(([tipo, datos]) => ({
-                      name: tipo.charAt(0).toUpperCase() + tipo.slice(1),
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      value: (datos as any).ingresos,
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      sesiones: (datos as any).sesiones
-                    }))}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {Object.entries(reporteActual.resumen.por_tipo_vehiculo).map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORES_GRAFICOS[index % COLORES_GRAFICOS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => [`$${value}`, 'Ingresos']} />
-                </PieChart>
-              </ResponsiveContainer>
+              <ChartContainer
+                config={{
+                  ingresos: {
+                    label: 'Ingresos',
+                    color: 'hsl(var(--chart-1))',
+                  },
+                }}
+                className="h-[260px]"
+              >
+                <AreaChart data={dataBar}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="periodo" />
+                  <YAxis />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Area 
+                    type="monotone" 
+                    dataKey="ingresos" 
+                    stroke="hsl(var(--chart-1))" 
+                    fill="hsl(var(--chart-1))" 
+                    fillOpacity={0.5} 
+                  />
+                </AreaChart>
+              </ChartContainer>
             </CardContent>
           </Card>
-        )}
+
+          {/* Gráfico de barras: ingresos por periodo */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Barras de Ingresos por Período</CardTitle>
+              <CardDescription>Comparativo de ingresos por periodo</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ChartContainer
+                config={{
+                  ingresos: {
+                    label: 'Ingresos',
+                    color: 'hsl(var(--chart-2))',
+                  },
+                }}
+                className="h-[260px]"
+              >
+                <RechartsPrimitive.BarChart data={dataBar}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="periodo" />
+                  <YAxis />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <RechartsPrimitive.Bar dataKey="ingresos" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
+                </RechartsPrimitive.BarChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+
+          {/* Gráfico de líneas: sesiones activas vs completadas */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Sesiones Activas vs Completadas</CardTitle>
+              <CardDescription>Evolución de sesiones por periodo</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ChartContainer
+                config={{
+                  activas: {
+                    label: 'Activas',
+                    color: 'hsl(var(--chart-3))',
+                  },
+                  completadas: {
+                    label: 'Completadas',
+                    color: 'hsl(var(--chart-4))',
+                  },
+                }}
+                className="h-[220px]"
+              >
+                <RechartsPrimitive.LineChart data={dataLine}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="periodo" />
+                  <YAxis />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <RechartsPrimitive.Line type="monotone" dataKey="activas" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={false} />
+                  <RechartsPrimitive.Line type="monotone" dataKey="completadas" stroke="hsl(var(--chart-4))" strokeWidth={2} dot={false} />
+                </RechartsPrimitive.LineChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+
+          {/* Gráfico de barras: ingresos por tipo de vehículo */}
+          {dataBarTipo.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Ingresos por Tipo de Vehículo (Barras)</CardTitle>
+                <CardDescription>Comparativo de ingresos por tipo</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer
+                  config={dataBarTipo.reduce((acc, curr) => {
+                    acc[curr.tipo] = { label: curr.tipo, color: curr.color };
+                    return acc;
+                  }, {} as Record<string, { label: string; color: string }>)}
+                  className="h-[220px]"
+                >
+                  <RechartsPrimitive.BarChart data={dataBarTipo}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="tipo" />
+                    <YAxis />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <RechartsPrimitive.Bar dataKey="ingresos" radius={[4, 4, 0, 0]}>
+                      {dataBarTipo.map((entry, idx) => (
+                        <RechartsPrimitive.Cell key={`cell-${idx}`} fill={entry.color} />
+                      ))}
+                    </RechartsPrimitive.Bar>
+                  </RechartsPrimitive.BarChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Gráfico de torta: ingresos por tipo de vehículo */}
+          {dataBarTipo.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Ingresos por Tipo de Vehículo (Torta)</CardTitle>
+                <CardDescription>Distribución de ingresos por categoría</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer
+                  config={dataBarTipo.reduce((acc, curr) => {
+                    acc[curr.tipo] = { label: curr.tipo, color: curr.color };
+                    return acc;
+                  }, {} as Record<string, { label: string; color: string }>)}
+                  className="h-[220px]"
+                >
+                  <PieChart>
+                    <Pie
+                      data={dataBarTipo}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={(entry) => {
+                        let tipo = '';
+                        if (entry && typeof entry === 'object' && entry.payload && typeof entry.payload === 'object' && 'tipo' in entry.payload) {
+                          tipo = String((entry.payload as { tipo?: string }).tipo ?? '');
+                        }
+                        const percent = typeof entry.percent === 'number' ? entry.percent : 0;
+                        return `${tipo} ${(percent * 100).toFixed(0)}%`;
+                      }}
+                      outerRadius={80}
+                      dataKey="ingresos"
+                    >
+                      {dataBarTipo.map((entry, idx) => (
+                        <RechartsPrimitive.Cell key={`cell-pie-${idx}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                  </PieChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </div>
-    )
-  }
+    );
+  };
 
   const renderResumenEjecutivo = () => {
     if (!reporteActual) return null

@@ -6,9 +6,9 @@ import { useAuth } from '@/lib/hooks/useAuth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+// ...existing code...
 import { toast } from 'sonner'
-import { AlertTriangle, Clock, Shield, Info } from 'lucide-react'
+import { Clock, Shield, Info } from 'lucide-react'
 
 function LoginContent() {
   const [email, setEmail] = useState('')
@@ -123,78 +123,65 @@ function LoginContent() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
-            Sistema de Cochera
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Inicia sesión para acceder al sistema
-          </p>
-        </div>
-        
-        {/* Mensaje de timeout si existe */}
-        {getTimeoutMessage()}
-
-        {/* Información de seguridad para tablets */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-gray-600 mt-0.5" />
-            <div className="flex-1">
-              <h3 className="font-semibold text-gray-800 text-sm">
-                🛡️ Seguridad para Tablets Compartidas
-              </h3>
-              <ul className="text-gray-600 text-xs mt-2 space-y-1">
-                <li>• Tu sesión se cerrará automáticamente después de 15 minutos sin actividad</li>
-                <li>• Tiempo máximo de sesión: 8 horas continuas</li>
-                <li>• La sesión se renovará automáticamente cada hora si estás activo</li>
-                <li>• Recibirás alertas antes del cierre automático</li>
-              </ul>
+    <div className="min-h-screen flex flex-col md:flex-row">
+      {/* Branding / mensaje izquierdo */}
+      <div className="hidden md:flex flex-col justify-center items-center w-1/2 bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-700 text-white p-12">
+        <div className="max-w-lg w-full">
+          <div className="mb-8">
+            <div className="flex items-center gap-3 mb-4">
+              <Shield className="h-10 w-10 text-white" />
+              <span className="text-3xl font-bold tracking-tight">Cochera System - BELEN</span>
             </div>
+            <h1 className="text-4xl font-extrabold mb-2">¡Bienvenido!</h1>
+            <p className="text-lg text-neutral-300 mb-6">Gestiona tu cochera de forma eficiente y segura.<br />Automatiza tareas y ahorra tiempo.</p>
           </div>
+          <div className="mt-16 text-xs text-neutral-400">© {new Date().getFullYear()} Cochera System. Todos los derechos reservados.</div>
         </div>
-        
-        <Card>
-          <CardHeader>
-            <CardTitle>Iniciar Sesión</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <Label htmlFor="email">Correo electrónico</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  placeholder="tu@email.com"
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="password">Contraseña</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  placeholder="••••••••"
-                />
-              </div>
-              
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading}
-              >
-                {loading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+      </div>
+
+      {/* Formulario derecho */}
+      <div className="flex flex-1 items-center justify-center bg-neutral-50">
+        <div className="max-w-md w-full p-8">
+          <div className="mb-8 text-center">
+            <span className="text-2xl font-bold text-neutral-900">Iniciar Sesión</span>
+            <p className="text-sm text-neutral-500 mt-2">Accede con tu cuenta para continuar</p>
+          </div>
+          {/* Mensaje de timeout si existe */}
+          {getTimeoutMessage()}
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <Label htmlFor="email" className="text-neutral-700">Correo electrónico</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                placeholder="tu@email.com"
+                className="mt-2 bg-white border border-neutral-300 text-neutral-900 focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+            <div>
+              <Label htmlFor="password" className="text-neutral-700">Contraseña</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                placeholder="••••••••"
+                className="mt-2 bg-white border border-neutral-300 text-neutral-900 focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+            <Button
+              type="submit"
+              className="w-full bg-neutral-900 text-white text-base font-semibold py-2 rounded-lg shadow hover:bg-neutral-800 transition-colors"
+              disabled={loading}
+            >
+              {loading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
+            </Button>
+          </form>
+        </div>
       </div>
     </div>
   )

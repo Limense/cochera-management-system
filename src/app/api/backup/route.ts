@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase/client'
+import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
+
+// Cliente admin de Supabase
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+)
 
 // Schema de validación para backup
 const backupSchema = z.object({
@@ -28,7 +40,7 @@ export async function GET(request: NextRequest) {
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 50
 
     // Obtener backups desde tabla de auditoría o archivo de configuración
-    const { data: backups, error } = await supabase
+    const { data: backups, error } = await supabaseAdmin
       .from('sistema_backups')
       .select('*')
       .eq(tipo ? 'tipo' : 'id', tipo || undefined)
@@ -118,10 +130,10 @@ export async function POST(request: NextRequest) {
     }
 
     // En un sistema real, esto se guardaría en una tabla de backups
-    // await supabase.from('sistema_backups').insert(nuevoBackup)
+    // await supabaseAdmin.from('sistema_backups').insert(nuevoBackup)
 
     // Log de auditoría
-    await supabase.from('auditoria_logs').insert({
+    await supabaseAdmin.from('auditoria_logs').insert({
       accion_tipo: 'backup_creado',
       tabla_afectada: 'sistema_backups',
       registro_id: nuevoBackup.id,
@@ -193,7 +205,7 @@ export async function PUT(request: NextRequest) {
     const resultadoRestauracion = await procesarRestauracion(validatedData, backupExiste)
 
     // Log de auditoría
-    await supabase.from('auditoria_logs').insert({
+    await supabaseAdmin.from('auditoria_logs').insert({
       accion_tipo: 'backup_restaurado',
       tabla_afectada: 'sistema_backups',
       registro_id: validatedData.backup_id,
@@ -274,7 +286,7 @@ export async function DELETE(request: NextRequest) {
     await eliminarArchivoBackup(backupExiste.nombre)
 
     // Log de auditoría
-    await supabase.from('auditoria_logs').insert({
+    await supabaseAdmin.from('auditoria_logs').insert({
       accion_tipo: 'backup_eliminado',
       tabla_afectada: 'sistema_backups',
       registro_id: backupId,
@@ -307,19 +319,19 @@ export async function DELETE(request: NextRequest) {
 
 async function obtenerEstadisticasBackup() {
   // Obtener estadísticas del sistema para backup
-  const { count: totalEspacios } = await supabase
+  const { count: totalEspacios } = await supabaseAdmin
     .from('espacios')
     .select('*', { count: 'exact', head: true })
 
-  const { count: totalVehiculos } = await supabase
+  const { count: totalVehiculos } = await supabaseAdmin
     .from('vehiculos')
     .select('*', { count: 'exact', head: true })
 
-  const { count: totalSesiones } = await supabase
+  const { count: totalSesiones } = await supabaseAdmin
     .from('sesiones_parqueo')
     .select('*', { count: 'exact', head: true })
 
-  const { count: totalUsuarios } = await supabase
+  const { count: totalUsuarios } = await supabaseAdmin
     .from('usuarios')
     .select('*', { count: 'exact', head: true })
 
@@ -352,9 +364,9 @@ async function generarBackup(configuracion: z.infer<typeof backupSchema>) {
   if (configuracion.incluir_datos) {
     // Obtener datos de tablas principales
     if (configuracion.tipo === 'completo' || configuracion.tipo === 'incremental') {
-      const { data: espacios } = await supabase.from('espacios').select('*')
-      const { data: vehiculos } = await supabase.from('vehiculos').select('*')
-      const { data: sesiones } = await supabase.from('sesiones_parqueo').select('*')
+      const { data: espacios } = await supabaseAdmin.from('espacios').select('*')
+      const { data: vehiculos } = await supabaseAdmin.from('vehiculos').select('*')
+      const { data: sesiones } = await supabaseAdmin.from('sesiones_parqueo').select('*')
       
       datosBackup.espacios = espacios || []
       datosBackup.vehiculos = vehiculos || []
@@ -363,12 +375,12 @@ async function generarBackup(configuracion: z.infer<typeof backupSchema>) {
   }
 
   if (configuracion.incluir_usuarios) {
-    const { data: usuarios } = await supabase.from('usuarios').select('id, email, nombre, apellido, rol, is_active, permissions, created_at')
+    const { data: usuarios } = await supabaseAdmin.from('usuarios').select('id, email, nombre, apellido, rol, is_active, permissions, created_at')
     datosBackup.usuarios = usuarios || []
   }
 
   if (configuracion.incluir_configuracion) {
-    const { data: tarifas } = await supabase.from('tarifas_dinamicas').select('*')
+    const { data: tarifas } = await supabaseAdmin.from('tarifas_dinamicas').select('*')
     datosBackup.configuracion = {
       tarifas: tarifas || [],
       sistema: {
